@@ -785,12 +785,12 @@ app.get("/", (req, res) => {
                     hasToggles = true;
                     const isActive = d.dps[key];
                     const activeClass = isActive ? "active" : "";
-                    togglesHtml += \`
-                      <div class="toggle-btn \\\${activeClass}" onclick="toggleRelay('\\ \${d.id}', \\\${key}, \\\${!isActive})">
-                        <span>Relay \\\${key}</span>
+                    togglesHtml += `
+                      <div class="toggle-btn \${activeClass}" onclick="toggleRelay('\${d.id}', \${key}, \${!isActive})">
+                        <span>Relay \${key}</span>
                         <div class="indicator"></div>
                       </div>
-                    \`;
+                    `;
                   }
                 });
 
@@ -800,26 +800,26 @@ app.get("/", (req, res) => {
 
                 // Delete button only for manual devices
                 const deleteHtml = d.isManual 
-                  ? \`<button class="delete-btn" onclick="deleteDevice('\\ \${d.id}')">Delete</button>\`
+                  ? `<button class="delete-btn" onclick="deleteDevice('\${d.id}')">Delete</button>`
                   : "";
 
-                html += \`
+                html += `
                   <div class="device-card">
                     \${deleteHtml}
                     <div class="device-header">
-                      <div class="device-name">\\\${d.name}</div>
-                      <span class="\\\${badgeClass}">\\\${statusText}</span>
+                      <div class="device-name">\${d.name}</div>
+                      <span class="\${badgeClass}">\${statusText}</span>
                     </div>
                     <div class="device-info">
-                      <strong>IP:</strong> \\\${d.ip} &nbsp;|&nbsp;
-                      <strong>Device ID:</strong> \\\${d.id} &nbsp;|&nbsp;
-                      <strong>Key:</strong> \\\${d.local_key}
+                      <strong>IP:</strong> \${d.ip} &nbsp;|&nbsp;
+                      <strong>Device ID:</strong> \${d.id} &nbsp;|&nbsp;
+                      <strong>Key:</strong> \${d.local_key}
                     </div>
                     <div class="entity-toggles">
-                      \\\${togglesHtml}
+                      \${togglesHtml}
                     </div>
                   </div>
-                \`;
+                `;
               });
 
               container.innerHTML = html;
@@ -828,11 +828,10 @@ app.get("/", (req, res) => {
         }
 
         function toggleRelay(deviceId, channel, value) {
-          const cleanId = deviceId.trim().replace(/^\\\s+/, "");
           fetch("api/control", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ deviceId: cleanId, channel, value })
+            body: JSON.stringify({ deviceId, channel, value })
           })
           .then(r => r.json())
           .then(res => {
@@ -845,12 +844,11 @@ app.get("/", (req, res) => {
         }
 
         function deleteDevice(deviceId) {
-          const cleanId = deviceId.trim().replace(/^\\\s+/, "");
           if (confirm("Are you sure you want to remove this device?")) {
             fetch("api/delete-device", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: cleanId })
+              body: JSON.stringify({ id: deviceId })
             })
             .then(r => r.json())
             .then(res => {
