@@ -801,18 +801,18 @@ app.get("/", (req, res) => {
           let entitiesHtml = "";
           if (dev.entities && dev.entities.length > 0) {
             dev.entities.forEach(ent => {
-              entitiesHtml += `
+              entitiesHtml += \`
                 <div style="margin-bottom: 0.5rem; padding-left: 0.5rem; border-left: 1px solid var(--border);">
                   <div style="font-weight:600; color:var(--accent);">\${ent.name}</div>
                   <div style="color:var(--text-muted); font-size:0.75rem; font-family:monospace;">\${ent.entity_id}</div>
                 </div>
-              `;
+              \`;
             });
           } else {
             entitiesHtml = '<div style="color:var(--text-muted); font-size:0.75rem;">No Home Assistant entities mapped yet. Connection is required.</div>';
           }
 
-          container.innerHTML = `
+          container.innerHTML = \`
             <div class="details-item">
               <span class="details-label">Device Name:</span>
               <span class="details-val">\${dev.name}</span>
@@ -841,7 +841,7 @@ app.get("/", (req, res) => {
               <span class="details-label">Raw DPS State:</span>
               <pre class="code-block">\${JSON.stringify(dev.dps, null, 2)}</pre>
             </div>
-          `;
+          \`;
           
           document.getElementById("info-modal").style.display = "flex";
         }
