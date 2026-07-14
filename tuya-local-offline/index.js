@@ -530,7 +530,7 @@ app.get("/", (req, res) => {
 
         // Load devices list and poll
         function refreshDevices() {
-          fetch("/api/devices")
+          fetch("api/devices")
             .then(r => r.json())
             .then(devices => {
               const container = document.getElementById("devices-list");
@@ -592,7 +592,7 @@ app.get("/", (req, res) => {
         }
 
         function toggleRelay(deviceId, channel, value) {
-          fetch("/api/control", {
+          fetch("api/control", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ deviceId, channel, value })
