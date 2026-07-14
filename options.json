@@ -1,0 +1,9 @@
+{
+  "clientId": "fm3jkpxtqcasd55ccu5g",
+  "secret": "72efa05625a5476d82c3ee6ca26dfb8e",
+  "uid": "in178357432738018c1f",
+  "mqtt_host": "192.168.2.202",
+  "mqtt_port": 1883,
+  "mqtt_user": "",
+  "mqtt_password": ""
+}

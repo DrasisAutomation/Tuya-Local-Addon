@@ -1,0 +1,10 @@
+{
+  "name": "tuya-local-offline",
+  "version": "1.0.0",
+  "description": "Tuya Local Offline HA Add-on",
+  "main": "index.js",
+  "dependencies": {
+    "tuyapi": "^7.5.2",
+    "mqtt": "^5.3.5"
+  }
+}
