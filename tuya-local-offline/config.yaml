@@ -1,5 +1,5 @@
 name: "Tuya Local Offline Integration"
-version: "1.0.4"
+version: "1.0.5"
 slug: "tuya_local_offline"
 description: "Locally controls Tuya devices offline and exposes them as Home Assistant entities via MQTT"
 arch:

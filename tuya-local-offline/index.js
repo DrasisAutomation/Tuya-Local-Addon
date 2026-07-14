@@ -162,8 +162,15 @@ async function fetchCloudDevices() {
     });
 
     if (res.success && Array.isArray(res.result)) {
-      console.log(`[Cloud] Sync complete. Found ${res.result.length} devices.`);
-      return res.result;
+      const wifiDevices = res.result.filter(d => {
+        // Ignore sub-devices (Zigbee sub-devices have sub: true)
+        if (d.sub === true) return false;
+        // Ignore gateways (gateways typically have category wg2, wg, etc.)
+        if (d.category && (d.category.startsWith("wg") || d.category === "gwy")) return false;
+        return true;
+      });
+      console.log(`[Cloud] Sync complete. Found ${res.result.length} devices. Filtered to ${wifiDevices.length} Wi-Fi devices.`);
+      return wifiDevices;
     } else {
       console.error("[Cloud] Error syncing devices:", res.msg);
     }
