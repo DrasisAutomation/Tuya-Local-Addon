@@ -412,6 +412,16 @@ function registerMqttEntity(deviceInfo, channel) {
   mqttClient.publish(configTopic, JSON.stringify(discoveryPayload), { retain: true });
 }
 
+function publishAllDiscovery() {
+  if (!mqttClient || !mqttClient.connected) return;
+  Object.keys(activeDevices).forEach(deviceId => {
+    const dev = activeDevices[deviceId];
+    for (let i = 1; i <= dev.channelsCount; i++) {
+      registerMqttEntity(dev.info, i);
+    }
+  });
+}
+
 // Initialize MQTT broker connection
 function connectMqtt() {
   if (!config.mqtt_host) return;
@@ -425,17 +435,13 @@ function connectMqtt() {
   mqttClient.on("connect", () => {
     console.log("[MQTT] Connected to broker successfully.");
     
-    // Subscribe to commands for all devices
-    Object.keys(activeDevices).forEach(deviceId => {
-      const dev = activeDevices[deviceId];
-      const commandTopic = `homeassistant/switch/${deviceId}_+/set`;
-      mqttClient.subscribe(commandTopic);
-      
-      // Re-register all entities in MQTT discovery
-      for (let i = 1; i <= dev.channelsCount; i++) {
-        registerMqttEntity(dev.info, i);
-      }
-    });
+    // Subscribe to standard HA switch set commands wildcard
+    const wildcardTopic = "homeassistant/switch/+/set";
+    mqttClient.subscribe(wildcardTopic);
+    console.log(`[MQTT] Subscribed to command topic: ${wildcardTopic}`);
+    
+    // Publish discovery config for all currently registered devices
+    setTimeout(publishAllDiscovery, 800);
   });
 
   mqttClient.on("message", (topic, message) => {
@@ -457,6 +463,9 @@ function connectMqtt() {
     }
   });
 }
+
+// Publish discovery periodically to prevent race condition or HA state drops
+setInterval(publishAllDiscovery, 15000);
 
 // Helper: slugify device name for predicting Entity ID
 function getHaEntityId(deviceName, channel) {
@@ -548,9 +557,11 @@ app.post("/api/add-device", (req, res) => {
   
   setupDevice(deviceInfo, mapping);
 
-  // Subscribe to MQTT commands for this new device
+  // Publish discovery configs for this manually added device immediately
   if (mqttClient && mqttClient.connected) {
-    mqttClient.subscribe(`homeassistant/switch/${id}_+/set`);
+    for (let i = 1; i <= channelsNum; i++) {
+      registerMqttEntity(deviceInfo, i);
+    }
   }
 
   res.json({ success: true, msg: "Device added and connection initialized." });
@@ -585,6 +596,16 @@ app.post("/api/control", async (req, res) => {
 
   try {
     await devInstance.device.set({ dps: parseInt(channel), set: value });
+    
+    // Update local cache immediately
+    devInstance.dpsState[channel] = value;
+
+    // Publish state update to MQTT instantly
+    if (mqttClient && mqttClient.connected) {
+      const stateTopic = `homeassistant/switch/${deviceId}_${channel}/state`;
+      mqttClient.publish(stateTopic, value ? "ON" : "OFF", { retain: true });
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, msg: err.message });
