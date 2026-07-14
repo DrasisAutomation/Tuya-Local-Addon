@@ -411,7 +411,7 @@ app.get("/", (req, res) => {
         h1 { font-size: 2rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .logo-subtitle { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.2rem; }
         
-        .layout { display: grid; grid-template-columns: 1fr 340px; gap: 2rem; }
+        .layout { display: grid; grid-template-columns: 1fr; gap: 2rem; }
         @media(max-width: 900px) { .layout { grid-template-columns: 1fr; } }
 
         .panel {
@@ -523,92 +523,10 @@ app.get("/", (req, res) => {
               <div style="text-align: center; color: var(--text-muted); padding: 2rem;">Scanning network and loading devices...</div>
             </div>
           </div>
-
-          <div class="panel" style="height: fit-content;">
-            <div class="panel-title">Developer & MQTT Config</div>
-            <form id="config-form">
-              <div class="form-group">
-                <label>Tuya Client ID (API Key)</label>
-                <input type="text" id="clientId" required>
-              </div>
-              <div class="form-group">
-                <label>Tuya Secret</label>
-                <input type="password" id="secret" required>
-              </div>
-              <div class="form-group">
-                <label>Tuya User UID</label>
-                <input type="text" id="uid" required>
-              </div>
-              <div class="form-group">
-                <label>MQTT Host IP</label>
-                <input type="text" id="mqtt_host" required>
-              </div>
-              <div class="form-group">
-                <label>MQTT Port</label>
-                <input type="number" id="mqtt_port" required>
-              </div>
-              <div class="form-group">
-                <label>MQTT User</label>
-                <input type="text" id="mqtt_user">
-              </div>
-              <div class="form-group">
-                <label>MQTT Password</label>
-                <input type="password" id="mqtt_password">
-              </div>
-              <button type="submit" class="btn">Save & Restart Service</button>
-            </form>
-            <div id="alert-box" class="alert"></div>
-          </div>
         </div>
       </div>
 
       <script>
-        // Load initial config
-        fetch("/api/config")
-          .then(r => r.json())
-          .then(data => {
-            document.getElementById("clientId").value = data.clientId || "";
-            document.getElementById("secret").value = data.secret || "";
-            document.getElementById("uid").value = data.uid || "";
-            document.getElementById("mqtt_host").value = data.mqtt_host || "";
-            document.getElementById("mqtt_port").value = data.mqtt_port || 1883;
-            document.getElementById("mqtt_user").value = data.mqtt_user || "";
-            document.getElementById("mqtt_password").value = data.mqtt_password || "";
-          });
-
-        // Config form submit
-        document.getElementById("config-form").addEventListener("submit", (e) => {
-          e.preventDefault();
-          const alertBox = document.getElementById("alert-box");
-          alertBox.style.display = "none";
-
-          const body = {
-            clientId: document.getElementById("clientId").value,
-            secret: document.getElementById("secret").value,
-            uid: document.getElementById("uid").value,
-            mqtt_host: document.getElementById("mqtt_host").value,
-            mqtt_port: parseInt(document.getElementById("mqtt_port").value),
-            mqtt_user: document.getElementById("mqtt_user").value,
-            mqtt_password: document.getElementById("mqtt_password").value
-          };
-
-          fetch("/api/config", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
-          })
-          .then(r => r.json())
-          .then(res => {
-            alertBox.className = "alert " + (res.success ? "success" : "error");
-            alertBox.textContent = res.msg;
-            alertBox.style.display = "block";
-          })
-          .catch(err => {
-            alertBox.className = "alert error";
-            alertBox.textContent = "Network error: " + err.message;
-            alertBox.style.display = "block";
-          });
-        });
 
         // Load devices list and poll
         function refreshDevices() {
