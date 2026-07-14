@@ -427,6 +427,15 @@ function connectMqtt() {
   });
 }
 
+// Helper: slugify device name for predicting Entity ID
+function getHaEntityId(deviceName, channel) {
+  const cleanName = deviceName.toLowerCase()
+    .replace(/[^a-z0-9\s-_]/g, "")
+    .trim()
+    .replace(/[\s-_]+/g, "_");
+  return `switch.${cleanName}_switch_${channel}`;
+}
+
 // -------------------------------------------------------------
 // Web UI & REST API
 // -------------------------------------------------------------
@@ -453,6 +462,20 @@ app.get("/api/devices", (req, res) => {
 
   const list = allDevices.map(device => {
     const active = activeDevices[device.id];
+    
+    // Predict HA entity IDs
+    const entities = [];
+    const dpsKeys = active ? Object.keys(active.dpsState) : ["1", "2"];
+    dpsKeys.forEach(k => {
+      if (["1", "2", "3", "4"].includes(k)) {
+        entities.push({
+          channel: k,
+          name: `${device.name || "Tuya Switch"} Switch ${k}`,
+          entity_id: getHaEntityId(device.name || "Tuya Switch", k)
+        });
+      }
+    });
+
     return {
       id: device.id,
       name: device.name || device.product_name,
@@ -461,7 +484,9 @@ app.get("/api/devices", (req, res) => {
       ip: active ? active.ip : "Not Found",
       connected: active ? active.connected : false,
       dps: active ? active.dpsState : {},
-      isManual: !!device.isManual
+      isManual: !!device.isManual,
+      entities: entities,
+      version: active ? active.device.device.version : "3.5"
     };
   });
   res.json(list);
@@ -543,103 +568,107 @@ app.get("/", (req, res) => {
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
       <style>
         :root {
-          --bg-color: #0b0f19;
-          --panel-bg: rgba(20, 27, 45, 0.7);
-          --accent: #00f2fe;
-          --accent-hover: #4facfe;
-          --text: #f3f4f6;
-          --text-muted: #9ca3af;
+          --bg-color: #000000;
+          --panel-bg: #09090b;
+          --card-bg: #121214;
+          --accent: #ffffff;
+          --accent-hover: #e4e4e7;
+          --text: #f4f4f5;
+          --text-muted: #71717a;
           --success: #10b981;
           --danger: #ef4444;
-          --border: rgba(0, 242, 254, 0.15);
+          --border: #27272a;
+          --border-hover: #52525b;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
           font-family: 'Outfit', sans-serif;
           background-color: var(--bg-color);
-          background-image: radial-gradient(circle at 10% 20%, rgba(0, 242, 254, 0.05) 0%, transparent 40%),
-                            radial-gradient(circle at 90% 80%, rgba(79, 172, 254, 0.05) 0%, transparent 40%);
           color: var(--text);
           min-height: 100vh;
           padding: 2rem;
         }
-        .container { max-width: 1000px; margin: 0 auto; }
+        .container { max-width: 900px; margin: 0 auto; }
         header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
-        h1 { font-size: 2rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .logo-subtitle { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.2rem; }
+        h1 { font-size: 1.8rem; font-weight: 700; color: var(--accent); letter-spacing: -0.03em; }
+        .logo-subtitle { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem; }
         
         .panel {
           background: var(--panel-bg);
-          backdrop-filter: blur(12px);
           border: 1px solid var(--border);
-          border-radius: 16px;
+          border-radius: 12px;
           padding: 1.5rem;
-          box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
           margin-bottom: 2rem;
         }
-        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.2rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
-        .panel-title { font-size: 1.25rem; font-weight: 600; color: var(--accent); }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+        .panel-title { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
 
         .device-card {
-          background: rgba(255, 255, 255, 0.02);
-          border: 1px solid rgba(255, 255, 255, 0.05);
-          border-radius: 12px;
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 8px;
           padding: 1.2rem;
           margin-bottom: 1rem;
-          transition: all 0.3s ease;
+          transition: border-color 0.2s ease;
           position: relative;
         }
-        .device-card:hover { border-color: var(--accent); box-shadow: 0 0 15px rgba(0, 242, 254, 0.1); }
-        .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; padding-right: 80px; }
-        .device-name { font-weight: 600; font-size: 1.1rem; }
+        .device-card:hover { border-color: var(--border-hover); }
+        .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-right: 90px; }
+        .device-name { font-weight: 600; font-size: 1rem; color: var(--accent); }
         
         .status-badge {
-          font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 99px; font-weight: 600;
+          font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-weight: 600; letter-spacing: 0.05em;
         }
-        .status-badge.online { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid var(--success); }
-        .status-badge.offline { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid var(--danger); }
+        .status-badge.online { background: rgba(16, 185, 129, 0.08); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.2); }
+        .status-badge.offline { background: rgba(239, 68, 68, 0.08); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.2); }
 
-        .device-info { font-size: 0.85rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 1rem; }
+        .device-info { font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 0.8rem; }
+        .device-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.8rem; }
 
-        .entity-toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.8rem; }
+        .more-info-link {
+          font-size: 0.75rem; color: var(--text-muted); text-decoration: underline; cursor: pointer; font-weight: 500;
+        }
+        .more-info-link:hover { color: var(--accent); }
+
+        .entity-toggles { display: flex; flex-wrap: wrap; gap: 0.6rem; }
         .toggle-btn {
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 8px;
-          padding: 0.6rem;
-          text-align: center;
+          background: transparent;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          padding: 0.4rem 0.8rem;
           cursor: pointer;
           font-weight: 600;
-          font-size: 0.9rem;
+          font-size: 0.8rem;
+          color: var(--text-muted);
           transition: all 0.2s ease;
-          display: flex;
-          justify-content: space-between;
+          display: inline-flex;
           align-items: center;
+          gap: 0.5rem;
         }
         .toggle-btn.active {
-          background: linear-gradient(135deg, rgba(0, 242, 254, 0.2), rgba(79, 172, 254, 0.2));
+          background: var(--accent);
           border-color: var(--accent);
-          color: var(--accent);
-          box-shadow: 0 0 10px rgba(0, 242, 254, 0.15);
+          color: var(--bg-color);
         }
-        .toggle-btn:hover { background: rgba(255, 255, 255, 0.08); }
-        .indicator { width: 10px; height: 10px; border-radius: 50%; background: #374151; display: inline-block; }
-        .toggle-btn.active .indicator { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .toggle-btn:hover { border-color: var(--border-hover); }
+
+        .indicator { width: 6px; height: 6px; border-radius: 50%; background: #3f3f46; display: inline-block; }
+        .toggle-btn.active .indicator { background: var(--bg-color); }
 
         .btn-add {
-          background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-          border: none; border-radius: 8px; padding: 0.5rem 1rem;
-          color: #0b0f19; font-weight: 700; font-size: 0.85rem; cursor: pointer;
-          transition: opacity 0.2s;
+          background: var(--accent);
+          border: none; border-radius: 6px; padding: 0.45rem 0.9rem;
+          color: var(--bg-color); font-weight: 600; font-size: 0.8rem; cursor: pointer;
+          transition: background-color 0.2s;
         }
-        .btn-add:hover { opacity: 0.9; }
+        .btn-add:hover { background-color: var(--accent-hover); }
 
         .delete-btn {
           position: absolute; top: 1.2rem; right: 1.2rem;
-          background: rgba(239, 68, 68, 0.1);
-          border: 1px solid rgba(239, 68, 68, 0.2);
-          border-radius: 6px; padding: 0.35rem 0.6rem;
-          color: var(--danger); font-size: 0.75rem; font-weight: 600; cursor: pointer;
+          background: transparent;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: 4px; padding: 0.25rem 0.5rem;
+          color: var(--danger); font-size: 0.7rem; font-weight: 600; cursor: pointer;
           transition: all 0.2s;
         }
         .delete-btn:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
@@ -647,35 +676,47 @@ app.get("/", (req, res) => {
         /* Modal Overlay & Card styling */
         .modal {
           display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-          background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+          background: rgba(0,0,0,0.85);
           justify-content: center; align-items: center; z-index: 1000;
         }
         .modal-content {
-          background: #141b2d; border: 1px solid var(--border); border-radius: 16px;
-          width: 90%; max-width: 450px; padding: 1.5rem; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+          background: var(--panel-bg); border: 1px solid var(--border); border-radius: 8px;
+          width: 90%; max-width: 480px; padding: 1.5rem;
         }
-        .modal-title { font-size: 1.2rem; font-weight: 700; color: var(--accent); margin-bottom: 1.2rem; display: flex; justify-content: space-between; }
+        .modal-title { font-size: 1.05rem; font-weight: 700; color: var(--accent); margin-bottom: 1.2rem; display: flex; justify-content: space-between; }
         
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight: 600; }
+        .form-group { margin-bottom: 0.9rem; }
+        .form-group label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; font-weight: 600; }
         .form-group input {
-          width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 8px; padding: 0.6rem; color: var(--text); font-family: inherit; font-size: 0.9rem;
+          width: 100%; background: #000000; border: 1px solid var(--border);
+          border-radius: 6px; padding: 0.5rem 0.7rem; color: var(--text); font-family: inherit; font-size: 0.85rem;
         }
-        .form-group input:focus { outline: none; border-color: var(--accent); }
+        .form-group input:focus { outline: none; border-color: var(--border-hover); }
 
-        .modal-actions { display: flex; gap: 0.8rem; margin-top: 1.5rem; }
-        .modal-actions button { flex: 1; padding: 0.6rem; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; }
-        .btn-save { background: linear-gradient(135deg, var(--accent), var(--accent-hover)); color: #0b0f19; }
-        .btn-cancel { background: rgba(255,255,255,0.08); color: var(--text); border: 1px solid rgba(255,255,255,0.1); }
+        .modal-actions { display: flex; gap: 0.6rem; margin-top: 1.5rem; }
+        .modal-actions button { flex: 1; padding: 0.5rem; border-radius: 6px; font-weight: 600; cursor: pointer; border: none; font-size: 0.8rem; }
+        .btn-save { background: var(--accent); color: var(--bg-color); }
+        .btn-cancel { background: transparent; color: var(--text); border: 1px solid var(--border); }
+
+        /* Details list */
+        .details-list { font-size: 0.8rem; line-height: 1.6; }
+        .details-item { margin-bottom: 0.6rem; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 0.4rem; }
+        .details-label { color: var(--text-muted); font-weight: 600; margin-right: 0.5rem; }
+        .details-val { font-family: monospace; color: var(--text); word-break: break-all; }
+        
+        .code-block {
+          background: #000000; border: 1px solid var(--border); border-radius: 4px;
+          padding: 0.6rem; font-family: monospace; font-size: 0.75rem; overflow-x: auto; max-height: 120px;
+          margin-top: 0.3rem; color: #a1a1aa;
+        }
       </style>
     </head>
     <body>
       <div class="container">
         <header>
           <div>
-            <h1>Tuya Local Offline Integration</h1>
-            <div class="logo-subtitle">Active Ingress Control Dashboard • Dark Aesthetics</div>
+            <h1>Tuya Local Offline</h1>
+            <div class="logo-subtitle">Active Ingress Dashboard • Premium Grayscale Style</div>
           </div>
         </header>
 
@@ -686,7 +727,7 @@ app.get("/", (req, res) => {
               <button class="btn-add" onclick="openModal()">+ Add Device Manually</button>
             </div>
             <div id="devices-list">
-              <div style="text-align: center; color: var(--text-muted); padding: 2rem;">Scanning network and loading devices...</div>
+              <div style="text-align: center; color: var(--text-muted); padding: 2rem; font-size: 0.85rem;">Scanning network and loading devices...</div>
             </div>
           </div>
         </div>
@@ -724,13 +765,89 @@ app.get("/", (req, res) => {
         </div>
       </div>
 
+      <!-- More Info Modal -->
+      <div id="info-modal" class="modal">
+        <div class="modal-content" style="max-width: 520px;">
+          <div class="modal-title">
+            <span>Device Integration Info</span>
+            <span style="cursor:pointer;" onclick="closeInfoModal()">&times;</span>
+          </div>
+          <div class="details-list" id="info-details">
+            <!-- Populated dynamically -->
+          </div>
+          <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeInfoModal()">Close</button>
+          </div>
+        </div>
+      </div>
+
       <script>
+        let cachedDevicesList = [];
+
         function openModal() {
           document.getElementById("device-modal").style.display = "flex";
         }
         function closeModal() {
           document.getElementById("device-modal").style.display = "none";
           document.getElementById("device-form").reset();
+        }
+
+        function openInfoModal(deviceId) {
+          const dev = cachedDevicesList.find(d => d.id === deviceId);
+          if (!dev) return;
+
+          const container = document.getElementById("info-details");
+          
+          let entitiesHtml = "";
+          if (dev.entities && dev.entities.length > 0) {
+            dev.entities.forEach(ent => {
+              entitiesHtml += `
+                <div style="margin-bottom: 0.5rem; padding-left: 0.5rem; border-left: 1px solid var(--border);">
+                  <div style="font-weight:600; color:var(--accent);">\${ent.name}</div>
+                  <div style="color:var(--text-muted); font-size:0.75rem; font-family:monospace;">\${ent.entity_id}</div>
+                </div>
+              `;
+            });
+          } else {
+            entitiesHtml = '<div style="color:var(--text-muted); font-size:0.75rem;">No Home Assistant entities mapped yet. Connection is required.</div>';
+          }
+
+          container.innerHTML = `
+            <div class="details-item">
+              <span class="details-label">Device Name:</span>
+              <span class="details-val">\${dev.name}</span>
+            </div>
+            <div class="details-item">
+              <span class="details-label">Device ID:</span>
+              <span class="details-val">\${dev.id}</span>
+            </div>
+            <div class="details-item">
+              <span class="details-label">Local IP Address:</span>
+              <span class="details-val">\${dev.ip}</span>
+            </div>
+            <div class="details-item">
+              <span class="details-label">Local Key:</span>
+              <span class="details-val">\${dev.local_key}</span>
+            </div>
+            <div class="details-item">
+              <span class="details-label">Protocol Version:</span>
+              <span class="details-val">\${dev.version || '3.5'}</span>
+            </div>
+            <div class="details-item" style="border-bottom:none;">
+              <span class="details-label">Registered HA Entities:</span>
+              <div style="margin-top:0.4rem;">\${entitiesHtml}</div>
+            </div>
+            <div class="details-item" style="border-bottom:none;">
+              <span class="details-label">Raw DPS State:</span>
+              <pre class="code-block">\${JSON.stringify(dev.dps, null, 2)}</pre>
+            </div>
+          `;
+          
+          document.getElementById("info-modal").style.display = "flex";
+        }
+
+        function closeInfoModal() {
+          document.getElementById("info-modal").style.display = "none";
         }
 
         // Add device form submit
@@ -764,9 +881,10 @@ app.get("/", (req, res) => {
           fetch("api/devices")
             .then(r => r.json())
             .then(devices => {
+              cachedDevicesList = devices;
               const container = document.getElementById("devices-list");
               if (devices.length === 0) {
-                container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No devices loaded. Use cloud config or click "+ Add Device Manually"!</div>';
+                container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem; font-size: 0.85rem;">No devices loaded. Click "+ Add Device Manually"!</div>';
                 return;
               }
 
@@ -785,25 +903,25 @@ app.get("/", (req, res) => {
                     hasToggles = true;
                     const isActive = d.dps[key];
                     const activeClass = isActive ? "active" : "";
-                    togglesHtml += \`
+                    togglesHtml += `
                       <div class="toggle-btn \${activeClass}" onclick="toggleRelay('\${d.id}', \${key}, \${!isActive})">
                         <span>Relay \${key}</span>
                         <div class="indicator"></div>
                       </div>
-                    \`;
+                    `;
                   }
                 });
 
                 if (!hasToggles) {
-                  togglesHtml = '<div style="font-size: 0.85rem; color: var(--text-muted);">No active switch relays detected yet. Connecting...</div>';
+                  togglesHtml = '<div style="font-size: 0.8rem; color: var(--text-muted);">No active switch relays detected yet. Connecting...</div>';
                 }
 
                 // Delete button only for manual devices
                 const deleteHtml = d.isManual 
-                  ? \`<button class="delete-btn" onclick="deleteDevice('\${d.id}')">Delete</button>\`
+                  ? `<button class="delete-btn" onclick="deleteDevice('\${d.id}')">Delete</button>`
                   : "";
 
-                html += \`
+                html += `
                   <div class="device-card">
                     \${deleteHtml}
                     <div class="device-header">
@@ -815,11 +933,14 @@ app.get("/", (req, res) => {
                       <strong>Device ID:</strong> \${d.id} &nbsp;|&nbsp;
                       <strong>Key:</strong> \${d.local_key}
                     </div>
-                    <div class="entity-toggles">
-                      \${togglesHtml}
+                    <div class="device-footer">
+                      <span class="more-info-link" onclick="openInfoModal('\${d.id}')">More Info</span>
+                      <div class="entity-toggles">
+                        \${togglesHtml}
+                      </div>
                     </div>
                   </div>
-                \`;
+                `;
               });
 
               container.innerHTML = html;
