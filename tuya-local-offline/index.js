@@ -139,6 +139,28 @@ async function scanLocalIps(devicesToFind) {
   return mapped;
 }
 
+// Helper: Scan local IPs or read manual configurations
+async function getDeviceIps(devicesToFind) {
+  const mapped = {};
+  const manualDevices = config.devices || [];
+
+  for (const device of devicesToFind) {
+    const manual = manualDevices.find(d => d.id === device.id);
+    if (manual && manual.ip) {
+      mapped[device.id] = { ip: manual.ip, version: "3.5" }; // Default to 3.5
+      console.log(`[Config] Manually mapped ${device.name} (${device.id}) to IP: ${manual.ip}`);
+    }
+  }
+
+  const remaining = devicesToFind.filter(d => !mapped[d.id]);
+  if (remaining.length > 0) {
+    const scanned = await scanLocalIps(remaining);
+    Object.assign(mapped, scanned);
+  }
+
+  return mapped;
+}
+
 // Fetch devices from cloud
 async function fetchCloudDevices() {
   if (!config.clientId || !config.secret || !config.uid) {
@@ -163,9 +185,7 @@ async function fetchCloudDevices() {
 
     if (res.success && Array.isArray(res.result)) {
       const wifiDevices = res.result.filter(d => {
-        // Ignore sub-devices (Zigbee sub-devices have sub: true)
         if (d.sub === true) return false;
-        // Ignore gateways (gateways typically have category wg2, wg, etc.)
         if (d.category && (d.category.startsWith("wg") || d.category === "gwy")) return false;
         return true;
       });
@@ -207,6 +227,13 @@ function setupDevice(deviceInfo, mapping) {
     dpsState: {}
   };
 
+  registerDeviceEvents(device, deviceInfo);
+  connectDevice(device, deviceInfo);
+}
+
+function registerDeviceEvents(device, deviceInfo) {
+  const deviceId = deviceInfo.id;
+
   device.on("error", (err) => {
     console.error(`[Tuya Error] Device: ${deviceInfo.name} (${deviceId}):`, err.message);
   });
@@ -214,7 +241,7 @@ function setupDevice(deviceInfo, mapping) {
   device.on("disconnected", () => {
     console.log(`[Tuya Disconnected] Device: ${deviceInfo.name}. Reconnecting in 10s...`);
     activeDevices[deviceId].connected = false;
-    setTimeout(() => connectDevice(device, deviceInfo), 10000);
+    setTimeout(() => connectDevice(activeDevices[deviceId].device, deviceInfo), 10000);
   });
 
   device.on("data", (data) => {
@@ -223,26 +250,29 @@ function setupDevice(deviceInfo, mapping) {
       Object.assign(activeDevices[deviceId].dpsState, data.dps);
       console.log(`[Tuya State] Device: ${deviceInfo.name} (${deviceId}) Data:`, JSON.stringify(data.dps));
       
-      Object.keys(data.dps).forEach(key => {
-        if (["1", "2", "3", "4"].includes(key) && typeof data.dps[key] === "boolean") {
-          const channelNum = parseInt(key);
-          const stateValue = data.dps[key] ? "ON" : "OFF";
-          
-          if (!activeDevices[deviceId].channels[channelNum]) {
-            registerMqttEntity(deviceInfo, channelNum);
-            activeDevices[deviceId].channels[channelNum] = true;
-          }
-
-          if (mqttClient && mqttClient.connected) {
-            const stateTopic = `homeassistant/switch/${deviceId}_${channelNum}/state`;
-            mqttClient.publish(stateTopic, stateValue, { retain: true });
-          }
-        }
-      });
+      handleDeviceState(deviceInfo, data.dps);
     }
   });
+}
 
-  connectDevice(device, deviceInfo);
+function handleDeviceState(deviceInfo, dps) {
+  const deviceId = deviceInfo.id;
+  Object.keys(dps).forEach(key => {
+    if (["1", "2", "3", "4"].includes(key) && typeof dps[key] === "boolean") {
+      const channelNum = parseInt(key);
+      const stateValue = dps[key] ? "ON" : "OFF";
+      
+      if (!activeDevices[deviceId].channels[channelNum]) {
+        registerMqttEntity(deviceInfo, channelNum);
+        activeDevices[deviceId].channels[channelNum] = true;
+      }
+
+      if (mqttClient && mqttClient.connected) {
+        const stateTopic = `homeassistant/switch/${deviceId}_${channelNum}/state`;
+        mqttClient.publish(stateTopic, stateValue, { retain: true });
+      }
+    }
+  });
 }
 
 async function connectDevice(device, deviceInfo) {
@@ -256,7 +286,26 @@ async function connectDevice(device, deviceInfo) {
   } catch (err) {
     console.error(`[Tuya Connect Fail] Device: ${deviceInfo.name} (${deviceInfo.id}):`, err.message);
     activeDevices[deviceInfo.id].connected = false;
-    setTimeout(() => connectDevice(device, deviceInfo), 15000);
+
+    // Auto version toggle retry logic to handle version mismatch
+    const nextVersion = device.device.version === "3.5" ? "3.3" : "3.5";
+    console.log(`[Tuya Version Toggle] Retrying connection to ${deviceInfo.name} in 15s using version ${nextVersion}...`);
+
+    try { await device.disconnect(); } catch (e) {}
+
+    const newDevice = new TuyAPI({
+      id: deviceInfo.id,
+      key: deviceInfo.local_key,
+      ip: activeDevices[deviceInfo.id].ip,
+      version: nextVersion,
+      issueRefreshOnConnect: false,
+      issueGetOnConnect: false
+    });
+
+    activeDevices[deviceInfo.id].device = newDevice;
+    registerDeviceEvents(newDevice, deviceInfo);
+    
+    setTimeout(() => connectDevice(newDevice, deviceInfo), 15000);
   }
 }
 
@@ -342,7 +391,6 @@ app.post("/api/config", (req, res) => {
     config = newConfig;
     res.json({ success: true, msg: "Configuration saved successfully. Restarting service..." });
     
-    // Graceful exit, Supervisor will reboot the container with new configs
     setTimeout(() => {
       console.log("[Main] Configuration changed. Exiting process for reboot.");
       process.exit(0);
@@ -476,42 +524,6 @@ app.get("/", (req, res) => {
 
         .indicator { width: 10px; height: 10px; border-radius: 50%; background: #374151; display: inline-block; }
         .toggle-btn.active .indicator { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem; font-weight: 600; }
-        .form-group input {
-          width: 100%;
-          background: rgba(0, 0, 0, 0.2);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 8px;
-          padding: 0.6rem;
-          color: var(--text);
-          font-family: inherit;
-          font-size: 0.9rem;
-          transition: border-color 0.2s;
-        }
-        .form-group input:focus { outline: none; border-color: var(--accent); }
-        
-        button.btn {
-          width: 100%;
-          background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-          border: none;
-          border-radius: 8px;
-          padding: 0.75rem;
-          color: #0b0f19;
-          font-weight: 700;
-          font-size: 0.95rem;
-          cursor: pointer;
-          transition: transform 0.2s, opacity 0.2s;
-        }
-        button.btn:hover { opacity: 0.9; }
-        button.btn:active { transform: scale(0.98); }
-
-        .alert {
-          border-radius: 8px; padding: 0.75rem; font-size: 0.85rem; margin-top: 1rem; display: none;
-        }
-        .alert.success { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid var(--success); }
-        .alert.error { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid var(--danger); }
       </style>
     </head>
     <body>
@@ -534,7 +546,6 @@ app.get("/", (req, res) => {
       </div>
 
       <script>
-
         // Load devices list and poll
         function refreshDevices() {
           fetch("api/devices")
@@ -562,8 +573,8 @@ app.get("/", (req, res) => {
                     const isActive = d.dps[key];
                     const activeClass = isActive ? "active" : "";
                     togglesHtml += \`
-                      <div class="toggle-btn \${activeClass}" onclick="toggleRelay('\${d.id}', \${key}, \${!isActive})">
-                        <span>Relay \${key}</span>
+                      <div class="toggle-btn \\\${activeClass}" onclick="toggleRelay('\\ \${d.id}', \\\${key}, \\\${!isActive})">
+                        <span>Relay \\\${key}</span>
                         <div class="indicator"></div>
                       </div>
                     \`;
@@ -571,23 +582,22 @@ app.get("/", (req, res) => {
                 });
 
                 if (!hasToggles) {
-                  // Fallback: show active status only
                   togglesHtml = '<div style="font-size: 0.85rem; color: var(--text-muted);">No active switch relays detected yet. Connecting...</div>';
                 }
 
                 html += \`
                   <div class="device-card">
                     <div class="device-header">
-                      <div class="device-name">\${d.name}</div>
-                      <span class="\${badgeClass}">\${statusText}</span>
+                      <div class="device-name">\\\${d.name}</div>
+                      <span class="\\\${badgeClass}">\\\${statusText}</span>
                     </div>
                     <div class="device-info">
-                      <strong>IP:</strong> \${d.ip} &nbsp;|&nbsp;
-                      <strong>Device ID:</strong> \${d.id} &nbsp;|&nbsp;
-                      <strong>Key:</strong> \${d.local_key}
+                      <strong>IP:</strong> \\\${d.ip} &nbsp;|&nbsp;
+                      <strong>Device ID:</strong> \\\${d.id} &nbsp;|&nbsp;
+                      <strong>Key:</strong> \\\${d.local_key}
                     </div>
                     <div class="entity-toggles">
-                      \${togglesHtml}
+                      \\\${togglesHtml}
                     </div>
                   </div>
                 \`;
@@ -599,10 +609,12 @@ app.get("/", (req, res) => {
         }
 
         function toggleRelay(deviceId, channel, value) {
+          // Clean dynamic string escaping issues if any
+          const cleanId = deviceId.trim().replace(/^\\\s+/, "");
           fetch("api/control", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ deviceId, channel, value })
+            body: JSON.stringify({ deviceId: cleanId, channel, value })
           })
           .then(r => r.json())
           .then(res => {
@@ -633,7 +645,7 @@ app.listen(PORT, () => {
 async function runLoops() {
   syncedDevices = await fetchCloudDevices();
   if (syncedDevices.length > 0) {
-    localIpMappings = await scanLocalIps(syncedDevices);
+    localIpMappings = await getDeviceIps(syncedDevices);
     connectMqtt();
     
     syncedDevices.forEach(device => {

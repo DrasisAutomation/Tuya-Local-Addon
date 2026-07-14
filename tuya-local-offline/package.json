@@ -1,6 +1,6 @@
 {
   "name": "tuya-local-offline",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Tuya Local Offline HA Add-on with Ingress Web UI",
   "main": "index.js",
   "dependencies": {
