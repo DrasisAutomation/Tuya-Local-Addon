@@ -242,7 +242,20 @@ function setupDevice(deviceInfo, mapping) {
   const ip = mapping.ip;
   const version = mapping.version;
 
-  console.log(`[Tuya] Initializing connection to ${deviceInfo.name} at ${ip} (v${version})...`);
+  // Determine channels count
+  let channelsCount = 1;
+  if (deviceInfo.status && Array.isArray(deviceInfo.status)) {
+    const switchStatuses = deviceInfo.status.filter(s => s.code.startsWith("switch_"));
+    if (switchStatuses.length > 0) {
+      channelsCount = switchStatuses.length;
+    }
+  } else if (mapping.channels) {
+    channelsCount = parseInt(mapping.channels) || 1;
+  } else if (deviceInfo.channels) {
+    channelsCount = parseInt(deviceInfo.channels) || 1;
+  }
+
+  console.log(`[Tuya] Initializing connection to ${deviceInfo.name} at ${ip} (v${version}) with ${channelsCount} channels...`);
 
   const device = new TuyAPI({
     id: deviceId,
@@ -259,8 +272,14 @@ function setupDevice(deviceInfo, mapping) {
     ip: ip,
     connected: false,
     channels: {},
-    dpsState: {}
+    dpsState: {},
+    channelsCount: channelsCount
   };
+
+  // Pre-populate dpsState for all channels with false so they show up immediately in UI
+  for (let i = 1; i <= channelsCount; i++) {
+    activeDevices[deviceId].dpsState[i.toString()] = false;
+  }
 
   registerDeviceEvents(device, deviceInfo);
   connectDevice(device, deviceInfo);
@@ -296,14 +315,17 @@ function registerDeviceEvents(device, deviceInfo) {
 
 function handleDeviceState(deviceInfo, dps) {
   const deviceId = deviceInfo.id;
+  const dev = activeDevices[deviceId];
+  if (!dev) return;
+
   Object.keys(dps).forEach(key => {
     if (["1", "2", "3", "4"].includes(key) && typeof dps[key] === "boolean") {
       const channelNum = parseInt(key);
       const stateValue = dps[key] ? "ON" : "OFF";
       
-      if (!activeDevices[deviceId].channels[channelNum]) {
+      if (!dev.channels[channelNum]) {
         registerMqttEntity(deviceInfo, channelNum);
-        activeDevices[deviceId].channels[channelNum] = true;
+        dev.channels[channelNum] = true;
       }
 
       if (mqttClient && mqttClient.connected) {
@@ -320,6 +342,15 @@ async function connectDevice(device, deviceInfo) {
     console.log(`[Tuya Connected] Device: ${deviceInfo.name} (${deviceInfo.id}) locally.`);
     activeDevices[deviceInfo.id].connected = true;
     
+    // Once connected, instantly register discovery for all channels in MQTT
+    const dev = activeDevices[deviceInfo.id];
+    if (dev) {
+      for (let i = 1; i <= dev.channelsCount; i++) {
+        registerMqttEntity(deviceInfo, i);
+        dev.channels[i] = true;
+      }
+    }
+
     await new Promise(resolve => setTimeout(resolve, 500));
     await device.set({ dps: 1, set: null });
   } catch (err) {
@@ -394,16 +425,16 @@ function connectMqtt() {
   mqttClient.on("connect", () => {
     console.log("[MQTT] Connected to broker successfully.");
     
-    // Subscribe to commands for synced devices
-    syncedDevices.forEach(device => {
-      const commandTopic = `homeassistant/switch/${device.id}_+/set`;
+    // Subscribe to commands for all devices
+    Object.keys(activeDevices).forEach(deviceId => {
+      const dev = activeDevices[deviceId];
+      const commandTopic = `homeassistant/switch/${deviceId}_+/set`;
       mqttClient.subscribe(commandTopic);
-    });
-
-    // Subscribe to commands for manual devices
-    manualDevices.forEach(device => {
-      const commandTopic = `homeassistant/switch/${device.id}_+/set`;
-      mqttClient.subscribe(commandTopic);
+      
+      // Re-register all entities in MQTT discovery
+      for (let i = 1; i <= dev.channelsCount; i++) {
+        registerMqttEntity(dev.info, i);
+      }
     });
   });
 
@@ -455,6 +486,7 @@ app.get("/api/devices", (req, res) => {
         name: m.name,
         product_name: "Manual Tuya Switch",
         local_key: m.local_key,
+        channels: m.channels || 1,
         isManual: true
       });
     }
@@ -465,16 +497,15 @@ app.get("/api/devices", (req, res) => {
     
     // Predict HA entity IDs
     const entities = [];
-    const dpsKeys = active ? Object.keys(active.dpsState) : ["1", "2"];
-    dpsKeys.forEach(k => {
-      if (["1", "2", "3", "4"].includes(k)) {
-        entities.push({
-          channel: k,
-          name: `${device.name || "Tuya Switch"} Switch ${k}`,
-          entity_id: getHaEntityId(device.name || "Tuya Switch", k)
-        });
-      }
-    });
+    const channelsCount = active ? active.channelsCount : (device.channels || 1);
+    
+    for (let k = 1; k <= channelsCount; k++) {
+      entities.push({
+        channel: k.toString(),
+        name: `${device.name || "Tuya Switch"} Switch ${k}`,
+        entity_id: getHaEntityId(device.name || "Tuya Switch", k)
+      });
+    }
 
     return {
       id: device.id,
@@ -493,21 +524,23 @@ app.get("/api/devices", (req, res) => {
 });
 
 app.post("/api/add-device", (req, res) => {
-  const { name, id, localKey, ip } = req.body;
+  const { name, id, localKey, ip, channels } = req.body;
   if (!name || !id || !localKey || !ip) {
     return res.status(400).json({ success: false, msg: "All fields are required." });
   }
 
+  const channelsNum = parseInt(channels) || 1;
+
   // Remove duplicate if exists
   manualDevices = manualDevices.filter(d => d.id !== id);
-  manualDevices.push({ name, id, local_key: localKey, ip });
+  manualDevices.push({ name, id, local_key: localKey, ip, channels: channelsNum });
   saveManualDevices(manualDevices);
 
-  console.log(`[UI Action] Manually added device: ${name} (${id}) at ${ip}`);
+  console.log(`[UI Action] Manually added device: ${name} (${id}) at ${ip} with ${channelsNum} channels`);
 
   // Set up the local client loop instantly
-  const deviceInfo = { id, name, local_key: localKey, product_name: "Manual Switch" };
-  const mapping = { ip, version: "3.5" };
+  const deviceInfo = { id, name, local_key: localKey, product_name: "Manual Switch", channels: channelsNum };
+  const mapping = { ip, version: "3.5", channels: channelsNum };
   
   if (activeDevices[id]) {
     try { activeDevices[id].device.disconnect(); } catch (e) {}
@@ -687,11 +720,11 @@ app.get("/", (req, res) => {
         
         .form-group { margin-bottom: 0.9rem; }
         .form-group label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; font-weight: 600; }
-        .form-group input {
+        .form-group input, .form-group select {
           width: 100%; background: #000000; border: 1px solid var(--border);
           border-radius: 6px; padding: 0.5rem 0.7rem; color: var(--text); font-family: inherit; font-size: 0.85rem;
         }
-        .form-group input:focus { outline: none; border-color: var(--border-hover); }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--border-hover); }
 
         .modal-actions { display: flex; gap: 0.6rem; margin-top: 1.5rem; }
         .modal-actions button { flex: 1; padding: 0.5rem; border-radius: 6px; font-weight: 600; cursor: pointer; border: none; font-size: 0.8rem; }
@@ -756,6 +789,15 @@ app.get("/", (req, res) => {
             <div class="form-group">
               <label>Local IP Address</label>
               <input type="text" id="devIp" placeholder="192.168.2.18" required>
+            </div>
+            <div class="form-group">
+              <label>Number of Channels (Relays)</label>
+              <select id="devChannels">
+                <option value="1">1 Channel</option>
+                <option value="2">2 Channels</option>
+                <option value="3">3 Channels</option>
+                <option value="4">4 Channels</option>
+              </select>
             </div>
             <div class="modal-actions">
               <button type="button" class="btn-cancel" onclick="closeModal()">Cancel</button>
@@ -857,7 +899,8 @@ app.get("/", (req, res) => {
             name: document.getElementById("devName").value.trim(),
             id: document.getElementById("devId").value.trim(),
             localKey: document.getElementById("devKey").value.trim(),
-            ip: document.getElementById("devIp").value.trim()
+            ip: document.getElementById("devIp").value.trim(),
+            channels: document.getElementById("devChannels").value
           };
 
           fetch("api/add-device", {
@@ -894,14 +937,17 @@ app.get("/", (req, res) => {
                 const statusText = isOnline ? "ONLINE (LAN)" : "OFFLINE (LAN)";
                 const badgeClass = isOnline ? "status-badge online" : "status-badge offline";
                 
-                // Expose switches for DPS 1, 2, 3, 4
+                // Expose switches for predicted channels
                 let togglesHtml = "";
                 let hasToggles = false;
                 
-                ["1", "2", "3", "4"].forEach(key => {
-                  if (d.dps[key] !== undefined && typeof d.dps[key] === "boolean") {
+                // Expose toggles for all predicted entities of this device
+                if (d.entities && d.entities.length > 0) {
+                  d.entities.forEach(ent => {
+                    const key = ent.channel;
                     hasToggles = true;
-                    const isActive = d.dps[key];
+                    // Default state to false if not yet returned in d.dps
+                    const isActive = (d.dps && d.dps[key]) === true;
                     const activeClass = isActive ? "active" : "";
                     togglesHtml += \`
                       <div class="toggle-btn \${activeClass}" onclick="toggleRelay('\${d.id}', \${key}, \${!isActive})">
@@ -909,8 +955,8 @@ app.get("/", (req, res) => {
                         <div class="indicator"></div>
                       </div>
                     \`;
-                  }
-                });
+                  });
+                }
 
                 if (!hasToggles) {
                   togglesHtml = '<div style="font-size: 0.8rem; color: var(--text-muted);">No active switch relays detected yet. Connecting...</div>';
@@ -1009,7 +1055,8 @@ async function runLoops() {
         id: m.id,
         name: m.name,
         local_key: m.local_key,
-        product_name: "Manual Switch"
+        product_name: "Manual Switch",
+        channels: m.channels || 1
       });
     }
   });
