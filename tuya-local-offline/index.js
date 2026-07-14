@@ -903,12 +903,12 @@ app.get("/", (req, res) => {
                     hasToggles = true;
                     const isActive = d.dps[key];
                     const activeClass = isActive ? "active" : "";
-                    togglesHtml += `
+                    togglesHtml += \`
                       <div class="toggle-btn \${activeClass}" onclick="toggleRelay('\${d.id}', \${key}, \${!isActive})">
                         <span>Relay \${key}</span>
                         <div class="indicator"></div>
                       </div>
-                    `;
+                    \`;
                   }
                 });
 
@@ -918,10 +918,10 @@ app.get("/", (req, res) => {
 
                 // Delete button only for manual devices
                 const deleteHtml = d.isManual 
-                  ? `<button class="delete-btn" onclick="deleteDevice('\${d.id}')">Delete</button>`
+                  ? \`<button class="delete-btn" onclick="deleteDevice('\${d.id}')">Delete</button>\`
                   : "";
 
-                html += `
+                html += \`
                   <div class="device-card">
                     \${deleteHtml}
                     <div class="device-header">
@@ -940,7 +940,7 @@ app.get("/", (req, res) => {
                       </div>
                     </div>
                   </div>
-                `;
+                \`;
               });
 
               container.innerHTML = html;
